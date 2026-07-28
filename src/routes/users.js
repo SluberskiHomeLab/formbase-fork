@@ -1,6 +1,5 @@
 const { Router } = require('express');
 const bcrypt = require('bcryptjs');
-const { v4: uuid } = require('uuid');
 const crypto = require('crypto');
 const db = require('../db');
 const { generateToken, authMiddleware } = require('../auth');
@@ -15,7 +14,7 @@ router.post('/register', async (req, res) => {
     if (password.length < 6) return res.status(400).json({ error: 'Password must be 6+ characters' });
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
     if (existing) return res.status(409).json({ error: 'Email already registered' });
-    const id = uuid();
+    const id = crypto.randomUUID();
     const hash = await bcrypt.hash(password, 10);
     const apiKey = 'fb_' + crypto.randomBytes(24).toString('hex');
     db.prepare('INSERT INTO users (id, email, password_hash, api_key) VALUES (?, ?, ?, ?)').run(id, email, hash, apiKey);

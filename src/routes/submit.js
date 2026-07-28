@@ -1,5 +1,5 @@
 const { Router } = require('express');
-const { v4: uuid } = require('uuid');
+const { randomUUID } = require('crypto');
 const db = require('../db');
 
 const router = Router();
@@ -23,7 +23,7 @@ router.post('/:formId', async (req, res) => {
     const honeypot = form.honeypot_field || '_gotcha';
     if (req.body[honeypot]) {
       // Silent spam trap — accept but flag
-      const id = uuid();
+      const id = randomUUID();
       const data = { ...req.body };
       delete data[honeypot];
       db.prepare('INSERT INTO submissions (id, form_id, data, ip, user_agent, is_spam) VALUES (?, ?, ?, ?, ?, 1)')
@@ -44,7 +44,7 @@ router.post('/:formId', async (req, res) => {
       return res.status(429).json({ error: 'Monthly submission limit reached' });
     }
 
-    const id = uuid();
+    const id = randomUUID();
     db.prepare('INSERT INTO submissions (id, form_id, data, ip, user_agent) VALUES (?, ?, ?, ?, ?)')
       .run(id, form.id, JSON.stringify(data), req.ip, req.headers['user-agent']);
     db.prepare('UPDATE forms SET submission_count = submission_count + 1 WHERE id = ?').run(form.id);

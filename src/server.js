@@ -3,7 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 require('./db'); // init database
 
 const app = express();
@@ -20,7 +20,7 @@ app.use('/f', require('./routes/submit'));
 
 // Dashboard SPA
 app.use(express.static(path.join(__dirname, '..', 'public')));
-app.get('/dashboard*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+app.get('/dashboard{/*splat}', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
 // Health check
 app.get('/api/health', (req, res) => {

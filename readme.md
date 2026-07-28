@@ -4,7 +4,7 @@
 
 Drop-in replacement for Formspree, Basin, Getform — but self-hosted, free, and yours.
 
-![License](https://img.shields.io/badge/license-MIT-blue) ![Node](https://img.shields.io/badge/node-18%2B-green) ![Docker](https://img.shields.io/badge/docker-ready-blue)
+![License](https://img.shields.io/badge/license-MIT-blue) ![Node](https://img.shields.io/badge/node-20%2B-green) ![Docker](https://img.shields.io/badge/docker-ready-blue)
 
 ## Features
 

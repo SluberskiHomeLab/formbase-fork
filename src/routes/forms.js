@@ -1,5 +1,5 @@
 const { Router } = require('express');
-const { v4: uuid } = require('uuid');
+const { randomUUID } = require('crypto');
 const db = require('../db');
 const { authMiddleware } = require('../auth');
 
@@ -20,7 +20,7 @@ router.post('/', (req, res) => {
   const user = db.prepare('SELECT plan FROM users WHERE id = ?').get(req.user.id);
   const limit = PLAN_LIMITS[user.plan] || 3;
   if (count >= limit) return res.status(403).json({ error: `Form limit reached (${limit} on ${user.plan} plan)` });
-  const id = uuid();
+  const id = randomUUID();
   const { name, notify_email, redirect_url, honeypot_field, allowed_origins, webhook_url, auto_response_subject, auto_response_body } = req.body;
   if (!name) return res.status(400).json({ error: 'Form name required' });
   db.prepare(`INSERT INTO forms (id, user_id, name, notify_email, redirect_url, honeypot_field, allowed_origins, webhook_url, auto_response_subject, auto_response_body)
