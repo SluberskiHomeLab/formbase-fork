@@ -28,12 +28,38 @@ node src/server.js
 # → Running on http://localhost:3000
 ```
 
-### Docker
+### Docker Compose (recommended)
+
+```bash
+docker compose up -d
+```
+
+That's it — no configuration required. A signing secret is generated on first
+run and persisted in the data volume. Open http://localhost:3000 and create an
+account.
+
+To customise, copy `.env.example` to `.env` and set what you need; everything
+in it is optional. Two worth knowing about:
+
+- **`TRUST_PROXY=1`** — set this if a reverse proxy sits in front, otherwise
+  every request looks like it came from the proxy and rate limiting throttles
+  all users as one.
+- **`SSRF_ALLOW_PRIVATE=1`** — webhooks to private/LAN addresses are blocked by
+  default; set this only if your webhook target really is on your network.
+
+Data lives in the `formbase-data` named volume and survives `docker compose
+down`. Use `docker compose down -v` to delete it.
+
+### Docker (manual)
 
 ```bash
 docker build -t formbase .
 docker run -p 3000:3000 -v formbase-data:/app/data formbase
 ```
+
+The container runs as non-root (uid 1000). Named volumes inherit that
+ownership; if you bind-mount a host directory instead, `chown 1000:1000` it
+first.
 
 ## How It Works
 

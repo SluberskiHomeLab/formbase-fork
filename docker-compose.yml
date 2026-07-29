@@ -1,0 +1,102 @@
+# FormBase — self-hosted form backend.
+#
+#   docker compose up -d
+#
+# That is the whole setup. No configuration is required: a signing secret is
+# generated on first run and persisted in the data volume. Then open
+# http://localhost:3000 and create an account.
+#
+# To change anything below, either edit this file or drop a .env alongside it
+# (see .env.example) — Compose reads .env automatically.
+
+services:
+  formbase:
+    build: .
+    image: formbase:latest
+    container_name: formbase
+    restart: unless-stopped
+
+    ports:
+      # host:container — change only the left side, via FORMBASE_PORT in .env.
+      # The container always listens on 3000 (PORT and DATA_DIR are fixed in
+      # the Dockerfile and intentionally not overridable).
+      - "${FORMBASE_PORT:-3000}:3000"
+
+    # Every value below is optional and passed through from .env, so you never
+    # need to edit this file — set what you want in .env and leave the rest.
+    # An unset variable arrives as an empty string, which the app treats
+    # exactly as "not configured".
+    #
+    # This list is kept in step with .env.example, which documents the default
+    # for each one. Adding a variable in one file means adding it to the other.
+    environment:
+      # --- Signing secret ---------------------------------------------------
+      # Unset: a random secret is generated into the data volume on first run
+      # and reused across restarts. Set it explicitly if you run more than one
+      # replica, or they will issue tokens the others reject. Minimum 32 chars:
+      #   openssl rand -hex 32
+      JWT_SECRET: "${JWT_SECRET:-}"
+      # How long a login stays valid. Default 7d.
+      JWT_EXPIRES_IN: "${JWT_EXPIRES_IN:-}"
+
+      # --- Behind a reverse proxy -------------------------------------------
+      # Set to 1 if Traefik/nginx/Caddy sits in front, otherwise every request
+      # looks like it came from the proxy and rate limiting throttles all users
+      # as one. Leave unset when publishing the port directly — enabling it
+      # without a proxy lets anyone spoof X-Forwarded-For and evade the limits.
+      TRUST_PROXY: "${TRUST_PROXY:-}"
+
+      # --- Dashboard origin --------------------------------------------------
+      # Only needed if the dashboard is served from a different origin than the
+      # API. The normal same-origin setup needs nothing.
+      CORS_ORIGIN: "${CORS_ORIGIN:-}"
+
+      # --- Webhooks ----------------------------------------------------------
+      # Webhooks to private/LAN addresses are blocked by default to prevent
+      # server-side request forgery. Set to 1 only if you genuinely need to POST
+      # to something on your own network.
+      SSRF_ALLOW_PRIVATE: "${SSRF_ALLOW_PRIVATE:-}"
+
+      # --- Rate limits --------------------------------------------------------
+      # Defaults (10 / 5 / 30 / 300) suit a public instance. Raise them if your
+      # users share one source IP — office NAT, VPN, CGNAT.
+      RATE_LIMIT_AUTH_IP: "${RATE_LIMIT_AUTH_IP:-}"           # per IP / 15 min
+      RATE_LIMIT_AUTH_ACCOUNT: "${RATE_LIMIT_AUTH_ACCOUNT:-}" # per account / 15 min
+      RATE_LIMIT_SUBMIT: "${RATE_LIMIT_SUBMIT:-}"             # per IP / form / min
+      RATE_LIMIT_API: "${RATE_LIMIT_API:-}"                   # per IP / min
+
+      # --- Email notifications -------------------------------------------------
+      # Without SMTP_HOST, notifications are logged rather than sent.
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+
+    volumes:
+      # A NAMED volume, deliberately. The container runs as non-root (uid
+      # 1000) and a named volume inherits that ownership automatically. A bind
+      # mount does not — if you switch to one, chown the host directory to
+      # 1000:1000 first or the database will fail to open.
+      - formbase-data:/app/data
+
+    healthcheck:
+      # Uses node rather than curl/wget so it does not depend on anything
+      # extra being present in the image.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Modest hardening. The app needs no elevated capabilities and never
+    # writes outside /app/data.
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  formbase-data:
