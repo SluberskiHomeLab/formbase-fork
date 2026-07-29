@@ -46,6 +46,14 @@ services:
       # without a proxy lets anyone spoof X-Forwarded-For and evade the limits.
       TRUST_PROXY: "${TRUST_PROXY:-}"
 
+      # --- HTTPS -------------------------------------------------------------
+      # Set to 1 ONLY when FormBase is actually reachable over https. It turns
+      # on HSTS and the CSP's upgrade-insecure-requests directive.
+      # Turning it on without TLS makes the dashboard render BLANK on any
+      # address other than localhost, because the browser tries to fetch
+      # /app.js over https and nothing answers.
+      FORCE_HTTPS: "${FORCE_HTTPS:-}"
+
       # --- Dashboard origin --------------------------------------------------
       # Only needed if the dashboard is served from a different origin than the
       # API. The normal same-origin setup needs nothing.
