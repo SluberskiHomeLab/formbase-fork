@@ -74,6 +74,7 @@ const apiCors = process.env.CORS_ORIGIN
 app.use('/f', cors(), require('./routes/submit'));
 app.use('/api/auth', apiCors, require('./routes/users'));
 app.use('/api/forms', apiCors, limit('api'), require('./routes/forms'));
+app.use('/api/admin', apiCors, limit('api'), require('./routes/admin'));
 
 // Health check. The public probe deliberately carries no instance statistics;
 // counts moved behind auth.
@@ -113,4 +114,17 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 FormBase running on http://localhost:${PORT}`));
+
+// Promote a pre-roles database's oldest account to admin, seed one from
+// ADMIN_EMAIL/ADMIN_PASSWORD if the instance is empty, and warn if
+// DISABLE_REGISTRATION has left no way in. Awaited before listening so the
+// first request cannot race the bootstrap.
+require('./lib/users').initUsers()
+  .catch(e => console.error('[formbase] user bootstrap failed:', e))
+  // Reports the SMTP configuration on startup so a broken relay is visible
+  // then, rather than as a single line at the moment a real enquiry is lost.
+  // Never rejects, and never blocks the listen.
+  .then(() => require('./lib/mailer').verify())
+  .finally(() => {
+    app.listen(PORT, () => console.log(`🚀 FormBase running on http://localhost:${PORT}`));
+  });

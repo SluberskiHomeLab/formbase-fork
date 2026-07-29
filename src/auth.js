@@ -14,12 +14,30 @@ function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header) return res.status(401).json({ error: 'No token provided' });
   const token = header.startsWith('Bearer ') ? header.slice(7) : header;
+
+  let claims;
   try {
-    req.user = jwt.verify(token, SECRET);
-    next();
+    claims = jwt.verify(token, SECRET);
   } catch {
     return res.status(401).json({ error: 'Invalid token' });
   }
+
+  // The token carries only an id and email; role and status are read from the
+  // row on every request rather than trusted from the claims. A token issued
+  // before an account was deactivated, deleted, or demoted would otherwise stay
+  // valid -- and admin -- until it expired, up to seven days later.
+  const db = require('./db');
+  const user = db.prepare('SELECT id, email, plan, role, is_active FROM users WHERE id = ?').get(claims.id);
+  if (!user) return res.status(401).json({ error: 'Invalid token' });
+  if (!user.is_active) return res.status(403).json({ error: 'Account is disabled' });
+
+  req.user = user;
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+  next();
 }
 
 // Compares two API keys without leaking their contents through timing.
@@ -36,11 +54,14 @@ function apiKeyMiddleware(req, res, next) {
   if (!key) return res.status(401).json({ error: 'API key required' });
   // Look the row up by key, then re-compare in constant time so the lookup
   // itself is not the only gate.
-  const user = db.prepare('SELECT id, email, plan, api_key FROM users WHERE api_key = ?').get(key);
+  const user = db.prepare('SELECT id, email, plan, role, is_active, api_key FROM users WHERE api_key = ?').get(key);
   if (!user || !safeKeyEqual(key, user.api_key)) {
     return res.status(401).json({ error: 'Invalid API key' });
   }
-  req.user = { id: user.id, email: user.email, plan: user.plan };
+  // A deactivated account's API key stops working too, otherwise disabling
+  // someone would leave their second credential wide open.
+  if (!user.is_active) return res.status(403).json({ error: 'Account is disabled' });
+  req.user = { id: user.id, email: user.email, plan: user.plan, role: user.role, is_active: user.is_active };
   next();
 }
 
@@ -52,5 +73,5 @@ function authAnyMiddleware(req, res, next) {
 }
 
 module.exports = {
-  generateToken, authMiddleware, apiKeyMiddleware, authAnyMiddleware, safeKeyEqual, SECRET
+  generateToken, authMiddleware, requireAdmin, apiKeyMiddleware, authAnyMiddleware, safeKeyEqual, SECRET
 };
