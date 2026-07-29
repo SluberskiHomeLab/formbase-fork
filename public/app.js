@@ -6,7 +6,17 @@
  * onclick= attributes: every handler is bound here, keyed off data-* hooks.
  */
 const API = '/api';
-let state = { user: null, token: localStorage.getItem('fb_token'), view: 'home', forms: [], selectedForm: null, submissions: [], formModal: false };
+let state = {
+  user: null, token: localStorage.getItem('fb_token'), view: 'home',
+  forms: [], selectedForm: null, submissions: [], formModal: false,
+  // User management. `registrationEnabled` mirrors the server's
+  // DISABLE_REGISTRATION switch so the sign-up form is hidden rather than
+  // offered and then rejected. `userModal` is null, 'create', or the user
+  // object being edited.
+  registrationEnabled: true, users: [], userModal: null
+};
+
+const isAdmin = () => state.user?.role === 'admin';
 
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}) };
@@ -25,6 +35,14 @@ function toast(msg, type = 'success') {
 }
 
 async function init() {
+  // Whether signup is open decides what the auth page renders, so it is read
+  // before the first paint. A failure here is not fatal -- the form still
+  // works, the server just refuses it.
+  try {
+    const config = await api('/auth/config');
+    state.registrationEnabled = config.registration_enabled !== false;
+  } catch { /* leave the default */ }
+
   if (state.token) {
     try { state.user = await api('/auth/me'); state.view = 'dashboard'; } catch { logout(); }
   }
@@ -45,6 +63,13 @@ async function loadSubmissions(formId) {
   render();
 }
 
+async function loadUsers() {
+  const res = await api('/admin/users');
+  state.users = res.users;
+  state.registrationEnabled = res.registration_enabled !== false;
+  render();
+}
+
 function render() {
   const app = document.getElementById('app');
   switch (state.view) {
@@ -52,6 +77,8 @@ function render() {
     case 'auth': app.innerHTML = renderAuth(); break;
     case 'dashboard': app.innerHTML = renderNav() + renderDashboard(); break;
     case 'form-detail': app.innerHTML = renderNav() + renderFormDetail(); break;
+    case 'users': app.innerHTML = renderNav() + renderUsers(); break;
+    case 'account': app.innerHTML = renderNav() + renderAccount(); break;
     default: app.innerHTML = renderHome();
   }
   bindEvents();
@@ -88,21 +115,31 @@ function renderHome() {
 }
 
 function renderAuth() {
+  // With registration disabled there is only one thing this page can do, so it
+  // opens on Log In and drops the toggle entirely rather than showing a sign-up
+  // form the server will refuse.
+  const open = state.registrationEnabled;
   return `<nav><div class="logo" style="cursor:pointer" data-nav="home">⬡ Form<span>Base</span></div></nav>
     <div class="auth-page"><div class="auth-box">
-      <h2 id="auth-title">Sign Up</h2>
+      <h2 id="auth-title">${open ? 'Sign Up' : 'Log In'}</h2>
       <form id="auth-form">
         <div class="field"><label>Email</label><input type="email" id="auth-email" required></div>
         <div class="field"><label>Password</label><input type="password" id="auth-password" required minlength="6"></div>
-        <button type="submit" class="btn btn-primary" style="width:100%" id="auth-submit">Create Account</button>
+        <button type="submit" class="btn btn-primary" style="width:100%" id="auth-submit">${open ? 'Create Account' : 'Log In'}</button>
       </form>
-      <div class="auth-toggle"><span id="auth-mode-text">Already have an account?</span> <a href="#" id="auth-toggle">Log in</a></div>
+      ${open
+        ? `<div class="auth-toggle"><span id="auth-mode-text">Already have an account?</span> <a href="#" id="auth-toggle">Log in</a></div>`
+        : `<div class="auth-toggle">Registration is closed on this instance. Ask an administrator for an account.</div>`}
     </div></div>`;
 }
 
 function renderNav() {
   return `<nav><div class="logo" style="cursor:pointer" data-nav="dashboard">⬡ Form<span>Base</span></div>
-    <div class="nav-actions"><span class="user-email">${esc(state.user?.email || '')}</span>
+    <div class="nav-actions">
+    <button class="btn btn-outline btn-sm" data-nav="dashboard">Forms</button>
+    ${isAdmin() ? '<button class="btn btn-outline btn-sm" data-action="users">Users</button>' : ''}
+    <button class="btn btn-outline btn-sm" data-nav="account">Account</button>
+    <span class="user-email">${esc(state.user?.email || '')}${isAdmin() ? ' <span class="badge badge-admin">admin</span>' : ''}</span>
     <button class="btn btn-outline btn-sm" data-action="logout">Logout</button></div></nav>`;
 }
 
@@ -178,6 +215,102 @@ function renderFormDetail() {
   </div>`;
 }
 
+// ---------------------------------------------------------------- Users (admin)
+
+function renderUsers() {
+  const admins = state.users.filter(u => u.role === 'admin').length;
+  return `<div class="container">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h2>Users</h2><button class="btn btn-primary" id="new-user-btn">+ New User</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="num">${state.users.length}</div><div class="label">Accounts</div></div>
+      <div class="stat"><div class="num">${admins}</div><div class="label">Admins</div></div>
+      <div class="stat"><div class="num">${state.users.filter(u => !u.is_active).length}</div><div class="label">Disabled</div></div>
+      <div class="stat"><div class="num">${state.registrationEnabled ? 'Open' : 'Closed'}</div><div class="label">Registration</div></div>
+    </div>
+    ${state.registrationEnabled
+      ? `<div class="card"><div class="meta">Public sign-up is <b>open</b> — anyone who can reach this instance can create an account. Set <code>DISABLE_REGISTRATION=1</code> and restart to close it; accounts can still be created here.</div></div>`
+      : `<div class="card"><div class="meta">Public sign-up is <b>closed</b> (<code>DISABLE_REGISTRATION</code> is set). This page is the only way to create an account.</div></div>`}
+    <table><thead><tr><th>Email</th><th>Role</th><th>Plan</th><th>Status</th><th>Forms</th><th>Submissions</th><th>Created</th><th></th></tr></thead><tbody>
+    ${state.users.map(u => {
+      const self = u.id === state.user?.id;
+      return `<tr${u.is_active ? '' : ' style="opacity:.5"'}>
+        <td>${esc(u.email)}${self ? ' <span class="badge">you</span>' : ''}</td>
+        <td>${u.role === 'admin' ? '<span class="badge badge-admin">admin</span>' : 'user'}</td>
+        <td>${esc(u.plan)}</td>
+        <td>${u.is_active ? '<span class="badge badge-ok">active</span>' : '<span class="badge badge-off">disabled</span>'}</td>
+        <td>${u.form_count}</td>
+        <td>${u.submission_count}</td>
+        <td style="white-space:nowrap">${new Date(u.created_at.replace(' ', 'T') + 'Z').toLocaleDateString()}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-outline btn-sm edit-user" data-id="${esc(u.id)}">Edit</button>
+          ${self ? '' : `<button class="btn btn-danger btn-sm delete-user" data-id="${esc(u.id)}" data-email="${esc(u.email)}" data-forms="${u.form_count}" data-subs="${u.submission_count}">Delete</button>`}
+        </td></tr>`;
+    }).join('')}
+    </tbody></table>
+    ${state.userModal ? renderUserModal() : ''}
+  </div>`;
+}
+
+function renderUserModal() {
+  const creating = state.userModal === 'create';
+  const u = creating ? { email: '', role: 'user', plan: 'free', is_active: 1 } : state.userModal;
+  const self = !creating && u.id === state.user?.id;
+  const opt = (value, current, label) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label || value)}</option>`;
+  return `<div class="modal-overlay" id="modal-overlay"><div class="modal">
+    <h2>${creating ? 'Create User' : `Edit ${esc(u.email)}`}</h2>
+    <form id="user-form" data-id="${esc(u.id || '')}">
+      <div class="field"><label>Email *</label><input id="uf-email" type="email" required value="${esc(u.email)}"></div>
+      <div class="field"><label>Password ${creating ? '*' : '(leave blank to keep unchanged)'}</label>
+        <input id="uf-password" type="password" ${creating ? 'required' : ''} minlength="6" autocomplete="new-password"></div>
+      <div class="field"><label>Role</label><select id="uf-role"${self ? ' disabled' : ''}>
+        ${opt('user', u.role)}${opt('admin', u.role)}
+      </select>${self ? '<div class="meta" style="margin-top:4px">You cannot change your own role.</div>' : ''}</div>
+      <div class="field"><label>Plan</label><select id="uf-plan">
+        ${opt('free', u.plan)}${opt('pro', u.plan)}${opt('unlimited', u.plan)}
+      </select></div>
+      <div class="field"><label>Status</label><select id="uf-active"${self ? ' disabled' : ''}>
+        <option value="1"${u.is_active ? ' selected' : ''}>Active</option>
+        <option value="0"${u.is_active ? '' : ' selected'}>Disabled</option>
+      </select>${self ? '<div class="meta" style="margin-top:4px">You cannot deactivate your own account.</div>'
+        : '<div class="meta" style="margin-top:4px">Disabling blocks login and immediately invalidates existing tokens and API keys. Forms and submissions are kept.</div>'}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        ${creating ? '' : `<button type="button" class="btn btn-outline" id="regen-user-key" data-id="${esc(u.id)}">Regenerate API Key</button>`}
+        <button type="button" class="btn btn-outline" id="cancel-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">${creating ? 'Create' : 'Save'}</button>
+      </div>
+    </form>
+  </div></div>`;
+}
+
+// ---------------------------------------------------------------- Account
+
+function renderAccount() {
+  const u = state.user || {};
+  return `<div class="container">
+    <h2 style="margin-bottom:20px">Account</h2>
+    <div class="card">
+      <h3>${esc(u.email || '')}</h3>
+      <div class="meta" style="margin-top:4px">
+        Role: ${esc(u.role || 'user')} · Plan: ${esc(u.plan || 'free')} ·
+        ${u.form_count ?? 0} forms · ${u.total_submissions ?? 0} submissions
+      </div>
+      <h3 style="margin-top:16px">API Key</h3>
+      <div class="code copy-wrap" style="margin-top:8px"><button class="copy-btn" data-copy="${esc(u.api_key || '')}">Copy</button>${esc(u.api_key || '')}</div>
+      <button class="btn btn-outline btn-sm" id="regen-key" style="margin-top:8px">Regenerate API Key</button>
+    </div>
+    <div class="card">
+      <h3>Change Password</h3>
+      <form id="password-form" style="margin-top:12px;max-width:400px">
+        <div class="field"><label>Current password</label><input type="password" id="pw-current" required autocomplete="current-password"></div>
+        <div class="field"><label>New password</label><input type="password" id="pw-new" required minlength="6" autocomplete="new-password"></div>
+        <button type="submit" class="btn btn-primary">Update Password</button>
+      </form>
+    </div>
+  </div>`;
+}
+
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
 
 // The export endpoint needs an Authorization header, so a plain <a href> to it
@@ -211,12 +344,29 @@ function bindEvents() {
       if (action === 'logout') return logout();
       if (action === 'back') { e.preventDefault(); navigate('dashboard'); return loadForms(); }
       if (action === 'export') { e.preventDefault(); return exportCsv(el.dataset.id); }
+      if (action === 'users') {
+        state.view = 'users'; state.userModal = null;
+        try { return await loadUsers(); } catch (err) { return toast(err.message, 'error'); }
+      }
+    };
+  });
+  // Navigating back to Forms needs the list refreshed, not just the view swapped.
+  document.querySelectorAll('[data-nav="dashboard"]').forEach(el => {
+    el.onclick = async () => { navigate('dashboard'); try { await loadForms(); } catch { /* rendered empty */ } };
+  });
+  // The Account page shows counts and the API key, which the login response
+  // does not carry -- re-read the profile on the way in.
+  document.querySelectorAll('[data-nav="account"]').forEach(el => {
+    el.onclick = async () => {
+      navigate('account');
+      try { state.user = await api('/auth/me'); render(); } catch { /* keep what we have */ }
     };
   });
 
-  // Auth form
+  // Auth form. With registration closed the page is login-only and there is no
+  // toggle to flip, so the mode starts (and stays) on login.
   const authForm = document.getElementById('auth-form');
-  let isLogin = false;
+  let isLogin = !state.registrationEnabled;
   const toggle = document.getElementById('auth-toggle');
   if (toggle) toggle.onclick = e => {
     e.preventDefault(); isLogin = !isLogin;
@@ -242,9 +392,9 @@ function bindEvents() {
   const nf = document.getElementById('new-form-btn');
   if (nf) nf.onclick = () => { state.formModal = true; render(); };
   const cm = document.getElementById('cancel-modal');
-  if (cm) cm.onclick = () => { state.formModal = false; render(); };
+  if (cm) cm.onclick = () => { closeModals(); };
   const mo = document.getElementById('modal-overlay');
-  if (mo) mo.onclick = e => { if (e.target === mo) { state.formModal = false; render(); } };
+  if (mo) mo.onclick = e => { if (e.target === mo) closeModals(); };
 
   // Create form submit
   const cf = document.getElementById('create-form-form');
@@ -295,6 +445,102 @@ function bindEvents() {
       try { await api(`/forms/${el.dataset.fid}/submissions/${el.dataset.sid}`, { method: 'DELETE' }); await loadSubmissions(el.dataset.fid); toast('Deleted'); } catch (e) { toast(e.message, 'error'); }
     };
   });
+
+  bindUserEvents();
+  bindAccountEvents();
+}
+
+function closeModals() {
+  state.formModal = false;
+  state.userModal = null;
+  render();
+}
+
+function bindUserEvents() {
+  const nu = document.getElementById('new-user-btn');
+  if (nu) nu.onclick = () => { state.userModal = 'create'; render(); };
+
+  document.querySelectorAll('.edit-user').forEach(el => {
+    el.onclick = () => {
+      state.userModal = state.users.find(u => u.id === el.dataset.id) || null;
+      render();
+    };
+  });
+
+  document.querySelectorAll('.delete-user').forEach(el => {
+    el.onclick = async () => {
+      const { email, forms, subs } = el.dataset;
+      // Deleting cascades, so say what goes with the account rather than
+      // asking a bare "are you sure?".
+      if (!confirm(`Delete ${email}?\n\nThis also deletes ${forms} form(s) and ${subs} submission(s). This cannot be undone.`)) return;
+      try { await api(`/admin/users/${el.dataset.id}`, { method: 'DELETE' }); await loadUsers(); toast('User deleted'); }
+      catch (e) { toast(e.message, 'error'); }
+    };
+  });
+
+  const rk = document.getElementById('regen-user-key');
+  if (rk) rk.onclick = async () => {
+    if (!confirm("Regenerate this user's API key? Their existing key stops working immediately.")) return;
+    try { await api(`/admin/users/${rk.dataset.id}/regenerate-key`, { method: 'POST' }); toast('API key regenerated'); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+
+  const uf = document.getElementById('user-form');
+  if (uf) uf.onsubmit = async e => {
+    e.preventDefault();
+    const creating = state.userModal === 'create';
+    const password = document.getElementById('uf-password').value;
+    const body = {
+      email: document.getElementById('uf-email').value,
+      role: document.getElementById('uf-role').value,
+      plan: document.getElementById('uf-plan').value,
+      is_active: document.getElementById('uf-active').value === '1'
+    };
+    // A blank password field on edit means "keep the current one" -- sending
+    // an empty string would fail validation instead.
+    if (password) body.password = password;
+    // The disabled role/status selects on your own row are not submitted, so
+    // the request cannot trip the server's self-guards.
+    if (!creating && state.userModal.id === state.user?.id) { delete body.role; delete body.is_active; }
+
+    try {
+      if (creating) await api('/admin/users', { method: 'POST', body: JSON.stringify(body) });
+      else await api(`/admin/users/${uf.dataset.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      state.userModal = null;
+      await loadUsers();
+      // Editing yourself changes what the nav should show, so refresh it.
+      if (!creating && uf.dataset.id === state.user?.id) {
+        try { state.user = await api('/auth/me'); render(); } catch { /* nav stays as-is */ }
+      }
+      toast(creating ? 'User created' : 'User updated');
+    } catch (err) { toast(err.message, 'error'); }
+  };
+}
+
+function bindAccountEvents() {
+  const rk = document.getElementById('regen-key');
+  if (rk) rk.onclick = async () => {
+    if (!confirm('Regenerate your API key? Anything using the old key stops working immediately.')) return;
+    try {
+      const res = await api('/auth/me/regenerate-key', { method: 'POST' });
+      state.user = { ...state.user, api_key: res.api_key };
+      render();
+      toast('API key regenerated');
+    } catch (e) { toast(e.message, 'error'); }
+  };
+
+  const pf = document.getElementById('password-form');
+  if (pf) pf.onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api('/auth/me/password', { method: 'POST', body: JSON.stringify({
+        current_password: document.getElementById('pw-current').value,
+        new_password: document.getElementById('pw-new').value
+      })});
+      pf.reset();
+      toast('Password updated');
+    } catch (err) { toast(err.message, 'error'); }
+  };
 }
 
 // Boot

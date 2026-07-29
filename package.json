@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test:security": "node test/security.js"
+    "test:security": "node test/security.js",
+    "test:users": "node test/users.js"
   },
   "keywords": [
     "forms",

@@ -3,8 +3,8 @@ const { randomUUID } = require('crypto');
 const net = require('net');
 const db = require('../db');
 const { resolveSafeUrl, validateHttpUrl } = require('../lib/safe-url');
-const { escapeHtml } = require('../lib/escape');
 const { limitSubmit } = require('../lib/rate-limit');
+const mailer = require('../lib/mailer');
 
 const router = Router();
 
@@ -119,29 +119,13 @@ router.post('/:formId', limitSubmit(), async (req, res, next) => {
       });
     }
 
-    // Email notification (logged, actual sending requires SMTP config)
+    // Email notification. Not awaited, for the same reason the webhook is not:
+    // the person who filled in the form should get their confirmation page
+    // immediately rather than waiting on a mail server that may be slow or
+    // unreachable. Delivery failures are logged by the mailer.
     if (form.notify_email) {
-      console.log(`[NOTIFY] New submission on "${form.name}" → ${form.notify_email}`);
-      try {
-        const nodemailer = require('nodemailer');
-        if (process.env.SMTP_HOST) {
-          const transport = nodemailer.createTransport({
-            host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT) || 587,
-            auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-          });
-          // Keys and values come from an unauthenticated stranger; escape both
-          // before they land in an HTML email.
-          const fields = Object.entries(data)
-            .map(([k, v]) => `<b>${escapeHtml(k)}:</b> ${escapeHtml(v)}`)
-            .join('<br>');
-          await transport.sendMail({
-            from: process.env.SMTP_FROM || 'noreply@formbase.dev',
-            to: form.notify_email,
-            subject: `New submission: ${form.name}`,
-            html: `<h2>New submission on "${escapeHtml(form.name)}"</h2><p>${fields}</p><hr><small>Sent by FormBase</small>`
-          });
-        }
-      } catch (e) { console.error('Email error:', e.message); }
+      console.log(`[NOTIFY] New submission on "${form.name}" → ${form.notify_email}${mailer.isEnabled() ? '' : ' (not sent: SMTP not configured)'}`);
+      mailer.sendSubmissionNotification(form, data);
     }
 
     return handleSuccess(req, res, form);

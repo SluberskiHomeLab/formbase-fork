@@ -30,6 +30,21 @@ services:
     # This list is kept in step with .env.example, which documents the default
     # for each one. Adding a variable in one file means adding it to the other.
     environment:
+      # --- Registration -----------------------------------------------------
+      # Set to 1 to close public sign-up: /api/auth/register returns 403 for
+      # everyone and the dashboard hides the sign-up form. Existing accounts
+      # keep working, and admins can still create accounts from the Users page.
+      DISABLE_REGISTRATION: "${DISABLE_REGISTRATION:-}"
+
+      # --- First admin ------------------------------------------------------
+      # The first account created is automatically an admin, so normally you
+      # leave these unset and just sign up. Set both only when bringing up an
+      # instance with DISABLE_REGISTRATION already on, where there would
+      # otherwise be no way to create that first account. Applied only when the
+      # database has no users; ignored entirely once one exists.
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+
       # --- Signing secret ---------------------------------------------------
       # Unset: a random secret is generated into the data volume on first run
       # and reused across restarts. Set it explicitly if you run more than one
@@ -75,11 +90,20 @@ services:
 
       # --- Email notifications -------------------------------------------------
       # Without SMTP_HOST, notifications are logged rather than sent.
+      #
+      # SMTP_FROM must be an address your relay is allowed to send as — normally
+      # one on your own domain, usually the same as SMTP_USER. A From on a
+      # domain the relay does not own is rejected with
+      # "553 Sender is not allowed to relay emails" and the alert is lost.
+      #
+      # The config is verified at startup: `docker compose logs formbase | grep
+      # mail` shows either "[mail] ready: ..." or exactly what to change.
       SMTP_HOST: "${SMTP_HOST:-}"
-      SMTP_PORT: "${SMTP_PORT:-}"
+      SMTP_PORT: "${SMTP_PORT:-}"       # default 587
       SMTP_USER: "${SMTP_USER:-}"
       SMTP_PASS: "${SMTP_PASS:-}"
-      SMTP_FROM: "${SMTP_FROM:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"       # falls back to SMTP_USER if it is an address
+      SMTP_SECURE: "${SMTP_SECURE:-}"   # inferred from the port; 465 = implicit TLS
 
     volumes:
       # A NAMED volume, deliberately. The container runs as non-root (uid

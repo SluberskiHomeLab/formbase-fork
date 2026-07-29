@@ -16,7 +16,9 @@ db.exec(`
     password_hash TEXT NOT NULL,
     plan TEXT DEFAULT 'free',
     created_at TEXT DEFAULT (datetime('now')),
-    api_key TEXT UNIQUE
+    api_key TEXT UNIQUE,
+    role TEXT NOT NULL DEFAULT 'user',
+    is_active INTEGER NOT NULL DEFAULT 1
   );
 
   CREATE TABLE IF NOT EXISTS forms (
@@ -49,5 +51,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_submissions_form ON submissions(form_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_forms_user ON forms(user_id);
 `);
+
+// --- Migrations --------------------------------------------------------------
+// CREATE TABLE IF NOT EXISTS is a no-op on a database that already has the
+// table, so columns added after the fact need an explicit ALTER. Each is
+// applied only when absent, which makes running this on every boot idempotent.
+function addColumn(table, column, definition) {
+  const present = db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
+  if (!present) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+// role: 'admin' can manage every account; 'user' can only manage its own forms.
+addColumn('users', 'role', "TEXT NOT NULL DEFAULT 'user'");
+// is_active: 0 blocks login and invalidates already-issued tokens, without
+// destroying the account's forms and submissions the way a delete would.
+addColumn('users', 'is_active', 'INTEGER NOT NULL DEFAULT 1');
 
 module.exports = db;
