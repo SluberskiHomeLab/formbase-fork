@@ -17,7 +17,11 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
 COPY src/ src/
 COPY public/ public/
-RUN mkdir -p /app/data
+# Create and chown the data dir BEFORE the VOLUME declaration so a named volume
+# inherits the right ownership. Bind mounts do not inherit it -- chown the host
+# directory to uid 1000 if you mount one.
+RUN mkdir -p /app/data && chown -R node:node /app
+USER node
 EXPOSE 3000
 VOLUME /app/data
 CMD ["node", "src/server.js"]
