@@ -220,6 +220,23 @@ async function s9_csp() {
   const html = await (await fetch(`${BASE}/`)).text();
   record('S9d', 'index.html carries no inline <script> body',
     !/<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?\S[\s\S]*?<\/script>/.test(html));
+
+  // Regression: upgrade-insecure-requests breaks every non-localhost address
+  // on a plain-HTTP deployment -- the browser fetches /app.js over https, gets
+  // no TLS listener, and the dashboard renders blank. It must stay off unless
+  // FORCE_HTTPS=1 is set.
+  const forceHttps = process.env.FORCE_HTTPS === '1';
+  record('S9e', forceHttps
+    ? 'upgrade-insecure-requests present when FORCE_HTTPS=1'
+    : 'upgrade-insecure-requests absent on plain HTTP (LAN/IP access works)',
+    /upgrade-insecure-requests/.test(csp) === forceHttps,
+    `FORCE_HTTPS=${forceHttps ? '1' : 'unset'}, directive ${/upgrade-insecure-requests/.test(csp) ? 'present' : 'absent'}`);
+
+  const hsts = r.headers.get('strict-transport-security');
+  record('S9f', forceHttps
+    ? 'HSTS sent when FORCE_HTTPS=1'
+    : 'HSTS not sent on plain HTTP',
+    !!hsts === forceHttps, `Strict-Transport-Security: ${hsts}`);
 }
 
 // ---------------------------------------------------------------- S10

@@ -20,10 +20,29 @@ if (process.env.TRUST_PROXY) {
   app.set('trust proxy', /^\d+$/.test(value) ? Number(value) : value);
 }
 
+// Set FORCE_HTTPS=1 when the app is genuinely reachable over TLS (behind a
+// proxy that terminates it, or with a certificate of its own).
+//
+// It gates two headers that BREAK a plain-HTTP deployment:
+//
+//   upgrade-insecure-requests -- makes the browser re-request every asset over
+//     https. On http://<lan-ip>:3000 there is no TLS listener, so app.js fails
+//     to load and the dashboard renders blank. localhost is exempt because
+//     browsers treat it as a trustworthy origin, which is why it works there
+//     and nowhere else.
+//   Strict-Transport-Security -- ignored over plain HTTP, but pins the host to
+//     https the moment it is ever served over TLS.
+//
+// Default off so LAN and bare-IP deployments work out of the box.
+const FORCE_HTTPS = process.env.FORCE_HTTPS === '1';
+
 app.use(helmet({
+  hsts: FORCE_HTTPS ? undefined : false,
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
+      // null removes the directive helmet would otherwise add by default.
+      upgradeInsecureRequests: FORCE_HTTPS ? [] : null,
       // The dashboard's JS lives in public/app.js precisely so this can be
       // 'self' rather than 'unsafe-inline'.
       scriptSrc: ["'self'"],
